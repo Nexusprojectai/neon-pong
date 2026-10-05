@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>NEON PONG — Cyberpunk</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none}
+  html,body{height:100%;overflow:hidden;background:#05010f;font-family:"Courier New",Courier,monospace;color:#e0f2fe}
+  #stage{position:fixed;inset:0;display:block;touch-action:none;background:#05010f}
+
+  /* HUD */
+  #hud{position:fixed;top:0;left:0;right:0;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;z-index:10;pointer-events:none}
+  .score{font-size:34px;font-weight:bold;letter-spacing:2px;text-shadow:0 0 12px currentColor}
+  #scoreP{color:#22d3ee}
+  #scoreC{color:#f0abfc}
+  #mid{font-size:11px;letter-spacing:3px;color:#64748b;text-align:center}
+
+  /* Overlay */
+  #overlay{position:fixed;inset:0;z-index:30;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:24px;text-align:center;
+    background:radial-gradient(circle at 50% 45%,rgba(30,10,60,.92) 0%,rgba(5,1,15,.98) 70%)}
+  #overlay h1{font-size:38px;letter-spacing:6px;font-weight:bold;
+    color:#22d3ee;text-shadow:0 0 14px #22d3ee,0 0 34px #0891b2}
+  #overlay .sub{font-size:12px;letter-spacing:4px;color:#f0abfc;text-shadow:0 0 10px #d946ef;margin-top:-10px}
+  #overlay p{font-size:13px;color:#94a3b8;max-width:320px;line-height:1.6}
+  #overlay .k{color:#22d3ee}
+  .btn{min-width:220px;min-height:54px;border:2px solid #22d3ee;border-radius:8px;background:rgba(34,211,238,.08);color:#22d3ee;
+    font-family:inherit;font-size:16px;font-weight:bold;letter-spacing:3px;cursor:pointer;transition:all .15s;
+    box-shadow:0 0 16px rgba(34,211,238,.5),inset 0 0 16px rgba(34,211,238,.15)}
+  .btn:active{transform:scale(.96);background:rgba(34,211,238,.22)}
+  #hint{font-size:11px;color:#475569;letter-spacing:1px}
+
+  /* Difficulty row */
+  #diff{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .dbtn{min-height:42px;padding:0 16px;border-radius:6px;border:1px solid #334155;background:rgba(30,41,59,.5);color:#94a3b8;
+    font-family:inherit;font-size:12px;font-weight:bold;letter-spacing:1px;cursor:pointer;transition:all .15s}
+  .dbtn.active{border-color:#f0abfc;color:#f0abfc;box-shadow:0 0 12px rgba(217,70,239,.5)}
+
+  /* In-game controls */
+  #ctrl{position:fixed;bottom:0;left:0;right:0;z-index:10;display:flex;justify-content:space-between;padding:12px calc(12px + env(safe-area-inset-left)) calc(16px + env(safe-area-inset-bottom));pointer-events:none}
+  .pad{width:74px;height:74px;border-radius:50%;border:2px solid rgba(34,211,238,.35);background:rgba(34,211,238,.06);color:#22d3ee;
+    display:flex;align-items:center;justify-content:center;font-size:28px;pointer-events:auto;backdrop-filter:blur(4px)}
+  .pad:active{background:rgba(34,211,238,.25)}
+  #pauseBtn{position:fixed;top:14px;left:50%;transform:translateX(-50%);width:44px;height:44px;border-radius:50%;
+    border:1px solid #334155;background:rgba(30,41,59,.6);color:#94a3b8;font-size:16px;display:none;align-items:center;justify-content:center;z-index:11;pointer-events:auto}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<div id="hud">
+  <div class="score" id="scoreP">0</div>
+  <div id="mid">NEON PONG</div>
+  <div class="score" id="scoreC">0</div>
+</div>
+
+<button id="pauseBtn">⏸</button>
+
+<div id="ctrl">
+  <div class="pad" id="padL">▲</div>
+  <div class="pad" id="padR">▲</div>
+</div>
+
+<div id="overlay">
+  <h1>NEON PONG</h1>
+  <div class="sub">CYBERPUNK EDITION</div>
+  <p><span class="k">MOUSE</span> ou <span class="k">TOQUE</span> na tela pra mover sua raquete.<br>Ou use <span class="k">W/S</span> · <span class="k">↑/↓</span> · botões no canto.</p>
+  <div id="diff">
+    <button class="dbtn" data-d="easy">FÁCIL</button>
+    <button class="dbtn active" data-d="normal">NORMAL</button>
+    <button class="dbtn" data-d="hard">DIFÍCIL</button>
+  </div>
+  <button class="btn" id="startBtn">▶ INICIAR</button>
+  <div id="hint">Primeiro a 7 pontos vence · som liga no 1º toque</div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ================= SETUP ================= */
+var stage=document.getElementById('stage');
+var ctx=stage.getContext('2d');
+var W=0,H=0,DPR=1;
+var isMobile=window.innerWidth<820 || (navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=4);
+var LITE=isMobile;
+
+function resize(){
+  W=window.innerWidth; H=window.innerHeight;
+  DPR=isMobile?Math.min(window.devicePixelRatio||1,1.5):Math.min(window.devicePixelRatio||1,2);
+  stage.width=Math.floor(W*DPR); stage.height=Math.floor(H*DPR);
+  stage.style.width=W+'px'; stage.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize',resize);
+window.addEventListener('orientationchange',function(){setTimeout(resize,200);});
+resize();
+
+/* ================= AUDIO (WebAudio beeps) ================= */
+var actx=null;
+function initAudio(){ if(!actx){ try{actx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(actx&&actx.state==='suspended')actx.resume(); }
+function beep(freq,dur,type,vol){
+  if(!actx||LITE&&vol===0)return;
+  try{
+    var o=actx.createOscillator(), g=actx.createGain();
+    o.type=type||'square'; o.frequency.value=freq;
+    g.gain.setValueAtTime(vol||0.05,actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+(dur||0.08));
+    o.connect(g); g.connect(actx.destination);
+    o.start(); o.stop(actx.currentTime+(dur||0.08));
+  }catch(e){}
+}
+
+/* ================= GAME STATE ================= */
+var STATE='menu'; // menu | playing | paused | over
+var DIFF={easy:{es:0.045,emax:4.2},normal:{es:0.062,emax:5.6},hard:{es:0.085,emax:7.4}};
+var diff='normal';
+var WINSCORE=7;
+
+var PW=12;                    // paddle width
+var PH=90;                    // paddle height (base)
+var player={x:0,y:0,vy:0,score:0,target:0};
+var cpu={x:0,y:0,vy:0,score:0};
+var ball={x:0,y:0,vx:0,vy:0,r:8,speed:6};
+var keyUp=false,keyDown=false;
+var particles=[];
+var shake=0;
+var flash=0;
+var trail=[];                 // ball motion trail
+
+function resetBall(dir){
+  ball.x=W/2; ball.y=H/2;
+  var speed=DIFF[diff].emax*0.75;
+  var ang=(Math.random()*0.6-0.3);       // small vertical spread
+  ball.vx=dir*speed*Math.cos(ang);
+  ball.vy=speed*Math.sin(ang);
+  trail.length=0;
+}
+function resetGame(){
+  player.score=0; cpu.score=0;
+  PH=isMobile?72:90;
+  player.x=24; player.y=H/2-PH/2;
+  cpu.x=W-24-PW; cpu.y=H/2-PH/2;
+  player.vy=0; cpu.vy=0;
+  resetBall(Math.random()<0.5?-1:1);
+  particles.length=0;
+  updateScores();
+}
+function updateScores(){
+  document.getElementById('scoreP').textContent=player.score;
+  document.getElementById('scoreC').textContent=cpu.score;
+}
+
+/* ================= INPUT ================= */
+function movePaddleTo(y){
+  var target=y-PH/2;
+  player.y += (target-player.y)*0.35;
+}
+stage.addEventListener('mousemove',function(e){ if(STATE==='playing')movePaddleTo(e.clientY); });
+stage.addEventListener('touchmove',function(e){ if(STATE==='playing'){movePaddleTo(e.touches[0].clientY);e.preventDefault();} },{passive:false});
+stage.addEventListener('touchstart',function(e){ if(STATE==='playing'){movePaddleTo(e.touches[0].clientY);} });
+
+document.addEventListener('keydown',function(e){
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W')keyUp=true;
+  if(e.key==='ArrowDown'||e.key==='s'||e.key==='S')keyDown=true;
+  if(e.key===' '||e.key==='p'){togglePause();e.preventDefault();}
+});
+document.addEventListener('keyup',function(e){
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W')keyUp=false;
+  if(e.key==='ArrowDown'||e.key==='s'||e.key==='S')keyDown=false;
+});
+
+// On-screen pads
+var padL=document.getElementById('padL'), padR=document.getElementById('padR');
+function bindPad(el,dir){
+  var hold=false;
+  function on(e){hold=true;e.preventDefault();}
+  function off(e){hold=false;}
+  el.addEventListener('touchstart',on,{passive:false});
+  el.addEventListener('touchend',off);
+  el.addEventListener('touchcancel',off);
+  el.addEventListener('mousedown',on);
+  el.addEventListener('mouseup',off);
+  el.addEventListener('mouseleave',off);
+  el._hold=function(){return hold;};
+  el._dir=dir;
+}
+bindPad(padL,-1); bindPad(padR,1);
+
+document.getElementById('pauseBtn').addEventListener('click',togglePause);
+
+/* ================= DIFFICULTY UI ================= */
+var dbtns=document.querySelectorAll('.dbtn');
+for(var i=0;i<dbtns.length;i++){
+  dbtns[i].addEventListener('click',function(){
+    diff=this.dataset.d;
+    for(var j=0;j<dbtns.length;j++)dbtns[j].classList.remove('active');
+    this.classList.add('active');
+  });
+}
+
+document.getElementById('startBtn').addEventListener('click',function(){
+  initAudio();
+  document.getElementById('overlay').style.display='none';
+  document.getElementById('pauseBtn').style.display='flex';
+  resetGame();
+  STATE='playing';
+  lastT=performance.now();
+  loop(performance.now());
+});
+
+function togglePause(){
+  if(STATE==='playing'){STATE='paused';}
+  else if(STATE==='paused'){STATE='playing';lastT=performance.now();}
+}
+
+/* ================= PARTICLES ================= */
+function burst(x,y,color,n,power){
+  var count=LITE?Math.min(n,10):n;
+  for(var i=0;i<count;i++){
+    var a=Math.random()*Math.PI*2, s=Math.random()*power;
+    particles.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,c:color,sz:isMobile?2:2.6});
+  }
+}
+function updateParticles(){
+  for(var i=particles.length-1;i>=0;i--){
+    var p=particles[i];
+    p.x+=p.vx; p.y+=p.vy; p.vx*=0.94; p.vy*=0.94; p.life-=0.03;
+    if(p.life<=0)particles.splice(i,1);
+  }
+}
+
+/* ================= UPDATE ================= */
+function update(dt){
+  var dh=60*dt; // delta-heights helper
+
+  // Player keyboard/pad move
+  var pspd=0.9*dh;
+  if(keyUp)player.y-=pspd;
+  if(keyDown)player.y+=pspd;
+  if(padL._hold())player.y-=pspd;
+  if(padR._hold())player.y+=pspd;
+  if(player.y<0)player.y=0;
+  if(player.y>H-PH)player.y=H-PH;
+
+  // CPU AI — track ball with reaction speed based on difficulty
+  var cfg=DIFF[diff];
+  var center=cpu.y+PH/2;
+  var targetY=ball.y;
+  var diffY=targetY-center;
+  var desired=diffY*cfg.es;
+  if(desired>cfg.emax*dh)desired=cfg.emax*dh;
+  if(desired<-cfg.emax*dh)desired=-cfg.emax*dh;
+  cpu.y+=desired;
+  if(cpu.y<0)cpu.y=0;
+  if(cpu.y>H-PH)cpu.y=H-PH;
+
+  // Ball
+  ball.x+=ball.vx*dh;
+  ball.y+=ball.vy*dh;
+
+  // Trail
+  trail.push({x:ball.x,y:ball.y});
+  if(trail.length>(LITE?6:16))trail.shift();
+
+  // Wall bounce (top/bottom)
+  if(ball.y-ball.r<0){ball.y=ball.r;ball.vy*=-1;burst(ball.x,0,'#22d3ee',8,4);beep(300,0.05,'square',0.04);}
+  if(ball.y+ball.r>H){ball.y=H-ball.r;ball.vy*=-1;burst(ball.x,H,'#22d3ee',8,4);beep(300,0.05,'square',0.04);}
+
+  // Player paddle collision (left)
+  if(ball.vx<0 && ball.x-ball.r<player.x+PW && ball.x-ball.r>player.x-6 && ball.y>player.y && ball.y<player.y+PH){
+    ball.x=player.x+PW+ball.r;
+    var relP=((ball.y-(player.y+PH/2))/(PH/2));
+    relP=Math.max(-1,Math.min(1,relP));
+    var spd=Math.sqrt(ball.vx*ball.vx+ball.vy*ball.vy)*1.06;
+    if(spd>DIFF[diff].emax*1.9)spd=DIFF[diff].emax*1.9;
+    var angP=relP*0.9;
+    ball.vx=Math.cos(angP)*spd;
+    ball.vy=Math.sin(angP)*spd;
+    ball.speed=spd;
+    burst(ball.x,ball.y,'#22d3ee',12,6);
+    shake=LITE?3:6; flash=0.5;
+    beep(520,0.07,'square',0.06);
+  }
+  // CPU paddle collision (right)
+  if(ball.vx>0 && ball.x+ball.r>cpu.x && ball.x+ball.r<cpu.x+PW+6 && ball.y>cpu.y && ball.y<cpu.y+PH){
+    ball.x=cpu.x-ball.r;
+    var relC=((ball.y-(cpu.y+PH/2))/(PH/2));
+    relC=Math.max(-1,Math.min(1,relC));
+    var spd2=Math.sqrt(ball.vx*ball.vx+ball.vy*ball.vy)*1.06;
+    if(spd2>DIFF[diff].emax*1.9)spd2=DIFF[diff].emax*1.9;
+    var angC=relC*0.9;
+    ball.vx=-Math.cos(angC)*spd2;
+    ball.vy=Math.sin(angC)*spd2;
+    burst(ball.x,ball.y,'#f0abfc',12,6);
+    shake=LITE?3:6; flash=0.5;
+    beep(440,0.07,'square',0.06);
+  }
+
+  // Scoring
+  if(ball.x< -20){
+    cpu.score++; updateScores();
+    burst(W/2,H/2,'#f0abfc',26,8);
+    beep(180,0.22,'sawtooth',0.07);
+    checkWin(-1);
+  } else if(ball.x> W+20){
+    player.score++; updateScores();
+    burst(W/2,H/2,'#22d3ee',26,8);
+    beep(720,0.18,'square',0.07);
+    checkWin(1);
+  }
+
+  updateParticles();
+  if(shake>0)shake*=0.86;
+  if(flash>0)flash-=0.03;
+}
+
+function checkWin(dir){
+  if(player.score>=WINSCORE||cpu.score>=WINSCORE){
+    STATE='over';
+    showOver();
+  } else {
+    resetBall(dir);
+  }
+}
+
+function showOver(){
+  var win=player.score>cpu.score;
+  var ov=document.getElementById('overlay');
+  ov.style.display='flex';
+  ov.innerHTML='<h1 style="color:'+(win?'#22d3ee':'#f0abfc')+';text-shadow:0 0 14px currentColor">'+(win?'VOCÊ VENCEU':'CPU VENCEU')+'</h1>'
+    +'<div class="sub">'+player.score+' — '+cpu.score+'</div>'
+    +'<button class="btn" id="againBtn">↻ JOGAR DE NOVO</button>';
+  document.getElementById('againBtn').addEventListener('click',function(){
+    document.getElementById('overlay').style.display='none';
+    resetGame();
+    STATE='playing';
+    lastT=performance.now();
+    loop(performance.now());
+  });
+  var accent=win?'#22d3ee':'#f0abfc';
+  burst(W/2,H/2,accent,LITE?20:50,10);
+  beep(win?880:220,0.3,'square',0.08);
+}
+
+/* ================= RENDER ================= */
+function draw(){
+  // background
+  if(LITE){ ctx.fillStyle='#05010f'; }
+  else { ctx.fillStyle='#05010f'; }
+  ctx.fillRect(0,0,W,H);
+
+  // shake offset
+  var ox=0,oy=0;
+  if(shake>0.2){ ox=(Math.random()-0.5)*shake; oy=(Math.random()-0.5)*shake; }
+  ctx.save();
+  ctx.translate(ox,oy);
+
+  // grid lines (cyberpunk backdrop)
+  ctx.strokeStyle='rgba(34,211,238,0.06)';
+  ctx.lineWidth=1;
+  var gridStep=LITE?90:60;
+  ctx.beginPath();
+  for(var gx=0;gx<W;gx+=gridStep){ctx.moveTo(gx,0);ctx.lineTo(gx,H);}
+  for(var gy=0;gy<H;gy+=gridStep){ctx.moveTo(0,gy);ctx.lineTo(W,gy);}
+  ctx.stroke();
+
+  // center dashed line
+  ctx.strokeStyle='rgba(240,171,252,0.32)';
+  ctx.lineWidth=3;
+  ctx.setLineDash([14,18]);
+  ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();
+  ctx.setLineDash([]);
+
+  // glow pulses (only non-lite)
+  var pulse=0.5+0.5*Math.sin(performance.now()/400);
+  if(!LITE){
+    var g1=ctx.createRadialGradient(player.x+PW,H/2,10,player.x+PW,H/2,Math.max(W,H)*0.5);
+    g1.addColorStop(0,'rgba(34,211,238,0.10)');g1.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g1;ctx.fillRect(0,0,W,H);
+    var g2=ctx.createRadialGradient(cpu.x,H/2,10,cpu.x,H/2,Math.max(W,H)*0.5);
+    g2.addColorStop(0,'rgba(240,171,252,0.10)');g2.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g2;ctx.fillRect(0,0,W,H);
+  }
+
+  // ball trail
+  for(var t=0;t<trail.length;t++){
+    var a=(t/trail.length);
+    ctx.globalAlpha=a*0.5;
+    ctx.fillStyle='#67e8f9';
+    var sz=ball.r*a*(LITE?1:1.4);
+    ctx.beginPath();ctx.arc(trail[t].x,trail[t].y,sz,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  // particles
+  for(var p=0;p<particles.length;p++){
+    var pt=particles[p];
+    ctx.globalAlpha=Math.max(0,pt.life);
+    ctx.fillStyle=pt.c;
+    ctx.fillRect(pt.x,pt.y,pt.sz,pt.sz);
+  }
+  ctx.globalAlpha=1;
+
+  // player paddle (cyan)
+  if(!LITE){ctx.shadowBlur=18;ctx.shadowColor='#22d3ee';}
+  ctx.fillStyle='#22d3ee';
+  ctx.fillRect(player.x,player.y,PW,PH);
+  // cpu paddle (magenta)
+  if(!LITE){ctx.shadowColor='#f0abfc';}
+  ctx.fillStyle='#f0abfc';
+  ctx.fillRect(cpu.x,cpu.y,PW,PH);
+  if(!LITE)ctx.shadowBlur=0;
+
+  // ball (white-hot core)
+  if(!LITE){ctx.shadowBlur=22;ctx.shadowColor='#67e8f9';}
+  ctx.fillStyle='#e0f7ff';
+  ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fill();
+  if(!LITE)ctx.shadowBlur=0;
+
+  ctx.restore();
+
+  // hit flash
+  if(flash>0){
+    ctx.fillStyle='rgba(255,255,255,'+flash*0.25+')';
+    ctx.fillRect(0,0,W,H);
+  }
+
+  // paused text
+  if(STATE==='paused'){
+    ctx.fillStyle='rgba(5,1,15,0.65)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#22d3ee';ctx.font='bold 28px Courier New';ctx.textAlign='center';
+    ctx.shadowBlur=16;ctx.shadowColor='#22d3ee';
+    ctx.fillText('PAUSADO',W/2,H/2-6);
+    ctx.font='12px Courier New';ctx.fillStyle='#94a3b8';ctx.shadowBlur=0;
+    ctx.fillText('toque ou ESPAÇO pra continuar',W/2,H/2+24);
+    ctx.textAlign='start';
+  }
+}
+
+/* ================= LOOP ================= */
+var lastT=0;
+var FRAME_MS=isMobile?33:1000/60;
+function loop(t){
+  if(STATE==='over')return;
+  requestAnimationFrame(loop);
+  var dt=(t-lastT)/1000; lastT=t;
+  if(dt>0.1)dt=0.1;
+  if(STATE==='playing'){
+    if(t-lastT<0){}
+    update(dt);
+    draw();
+  } else if(STATE==='paused'){
+    draw();
+  }
+  return;
+}
+
+document.addEventListener('visibilitychange',function(){
+  if(document.hidden&&STATE==='playing')STATE='paused';
+});
+})();
+</script>
+</body>
+</html>
